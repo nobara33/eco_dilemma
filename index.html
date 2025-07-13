@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <title>エコノジレンマ・シミュレーター</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      background-color: #f5f5f5;
+      text-align: center;
+      padding: 20px;
+    }
+    h1 {
+      font-size: 24px;
+      margin-bottom: 10px;
+    }
+    .stats {
+      margin-bottom: 20px;
+    }
+    .stats div {
+      margin: 5px 0;
+    }
+    button {
+      margin: 6px;
+      padding: 10px;
+      font-size: 16px;
+      width: 300px;
+    }
+    .log {
+      margin-top: 20px;
+      font-size: 14px;
+      background: #fff;
+      padding: 12px;
+      border-radius: 8px;
+      max-height: 220px;
+      overflow-y: auto;
+      text-align: left;
+    }
+    .note {
+      font-size: 12px;
+      color: #666;
+      margin-top: -10px;
+      margin-bottom: 20px;
+    }
+  </style>
+</head>
+<body>
+  <h1>エコノジレンマ・シミュレーター</h1>
+  <div class="stats" id="stats"></div>
+  <div class="note">※ターン終了時に政策予算は +10 回復します</div>
+  <div id="choices"></div>
+  <div class="log" id="log"><strong>選択ログ:</strong><br></div>
+  <script>
+    const state = {
+      turn: 1,
+      maxTurn: 10,
+      economy: 50,
+      environment: 50,
+      happiness: 50,
+      budget: 100,
+      pendingEffects: [],
+      log: [],
+      doNothingCount: 0
+    };
+
+    function getEmojiBar(value, emoji, reverse = false) {
+      const level = Math.floor(Math.min(Math.max(value, 0), 100) / 20);
+      const count = reverse ? 5 - level : level;
+      return emoji.repeat(Math.max(1, count));
+    }
+
+    function getHappinessIcon() {
+      const h = state.happiness;
+      if (h >= 80) return "😊";
+      if (h >= 60) return "😀";
+      if (h >= 40) return "😐";
+      if (h >= 20) return "😟";
+      return "😫";
+    }
+
+    function getEconomyIcon() {
+      return state.economy >= 60 ? "📈" : "📉";
+    }
+
+    const policies = [
+      {
+        name: "原発再稼働",
+        immediate: () => {
+          state.economy += 10;
+          state.environment += 5;
+          state.happiness -= 5;
+          state.budget -= 20;
+          log("原発を再稼働し、経済を活性化したが環境負荷が増加。（経済+10、環境+5、幸福度-5、予算-20）");
+        }
+      },
+      {
+        name: "再生可能エネルギー推進",
+        immediate: () => {
+          state.happiness += 5;
+          state.budget -= 30;
+          scheduleEffect(3, () => {
+            state.environment -= 10;
+            state.economy += 5;
+            log("再エネ政策が実を結び、環境改善と経済成長が実現。（環境-10、経済+5）");
+          });
+          log("再生可能エネルギー推進に投資した。（幸福度+5、予算-30）");
+        }
+      },
+      {
+        name: "EV補助金",
+        immediate: () => {
+          state.happiness += 7;
+          state.budget -= 25;
+          scheduleEffect(4, () => {
+            state.environment -= 8;
+            state.economy += 3;
+            log("EV普及が進み、環境負荷が軽減され経済も刺激された。（環境-8、経済+3）");
+          });
+          log("EV補助金を支給した。（幸福度+7、予算-25）");
+        }
+      },
+      {
+        name: "環境規制の強化",
+        immediate: () => {
+          state.economy -= 10;
+          state.budget -= 10;
+          scheduleEffect(3, () => {
+            state.environment -= 5;
+            state.happiness += 5;
+            log("環境規制の効果で空気が改善し幸福度が上昇した。（環境-5、幸福度+5）");
+          });
+          log("環境規制を強化した。（経済-10、予算-10）");
+        }
+      },
+      {
+        name: "所得税減税",
+        immediate: () => {
+          state.economy += 5;
+          state.happiness += 5;
+          state.budget -= 20;
+          scheduleEffect(2, () => {
+            state.budget -= 10;
+            log("恒久的な税収減により財政余力が減った。（予算-10）");
+          });
+          log("所得税を減税した。（経済+5、幸福度+5、予算-20）");
+        }
+      },
+      {
+        name: "石炭火力発電の拡大",
+        immediate: () => {
+          state.economy += 10;
+          state.environment += 10;
+          state.budget -= 10;
+          scheduleEffect(2, () => {
+            state.happiness -= 5;
+            log("石炭火力の影響で空気が悪化し幸福度が低下した。（幸福度-5）");
+          });
+          log("石炭火力発電所を拡大した。（経済+10、環境+10、予算-10）");
+        }
+      },
+      {
+        name: "なにもしない",
+        immediate: () => {
+          state.doNothingCount++;
+          scheduleEffect(2, () => {
+            state.environment += 10;
+            state.happiness -= 5;
+            log("何もしなかったことで環境が悪化し国民の不満が高まった。（環境+10、幸福度-5）");
+          });
+          log("特に政策を実施しなかった。");
+        }
+      }
+    ];
+
+    function scheduleEffect(delay, effect) {
+      state.pendingEffects.push({ turn: state.turn + delay, effect });
+    }
+
+    function applyPendingEffects() {
+      const due = state.pendingEffects.filter(e => e.turn === state.turn);
+      due.forEach(e => e.effect());
+      state.pendingEffects = state.pendingEffects.filter(e => e.turn > state.turn);
+    }
+
+    function log(text) {
+      state.log.push(text);
+      const logDiv = document.getElementById("log");
+      logDiv.innerHTML = "<strong>選択ログ:</strong><br>" + state.log.map(l => "・" + l).join("<br>");
+    }
+
+    function updateStats() {
+      const s = state;
+      document.getElementById("stats").innerHTML = `
+        <div><strong>ターン:</strong> ${s.turn} / ${s.maxTurn}</div>
+        <div><strong>経済活性度:</strong> ${s.economy} ${getEconomyIcon()}</div>
+        <div><strong>環境負荷レベル:</strong> ${s.environment} ${getEmojiBar(s.environment, "🌱", true)}</div>
+        <div><strong>幸福度:</strong> ${s.happiness} ${getHappinessIcon()}</div>
+        <div><strong>政策予算:</strong> ${s.budget} ${getEmojiBar(s.budget, "💰")}</div>
+      `;
+    }
+
+    function getResultComment() {
+      const { economy, environment, happiness, doNothingCount, maxTurn } = state;
+      if (doNothingCount === maxTurn) {
+        return { type: "🤔 無策型", comment: "すべてのターンで何もせず、状況は悪化しました。選択しないこともまた選択ですが、その代償は小さくなかったようです。" };
+      }
+      if (economy >= 70 && environment <= 20 && happiness >= 80) {
+        return { type: "🏆 優等生型", comment: "経済・環境・幸福度のすべてにおいて素晴らしい成果を収めました。模範的な政策判断でした。" };
+      }
+      if (economy >= 70 && environment >= 50) {
+        return { type: "🏙️ 経済優先型", comment: "あなたは経済を大きく成長させる道を選びました。環境への負荷はやや増えましたが、活発な産業活動によって多くの人が豊かさを感じたかもしれません。" };
+      } else if (environment <= 40 && economy <= 60) {
+        return { type: "🌱 環境保護型", comment: "あなたは環境への配慮を重視しました。経済の成長は控えめでしたが、未来の世代のために美しい地球を残そうとする姿勢が見られました。" };
+      } else if (
+        economy >= 50 && economy <= 85 &&
+        environment >= 40 && environment <= 80 &&
+        happiness >= 50 && happiness <= 85
+      ) {
+        return { type: "⚖️ バランス型", comment: "あなたは難しいジレンマの中でバランスを取り続けました。すべてを完璧にするのは難しくても、多くの人にとって納得感のある社会を目指したといえるでしょう。" };
+      } else {
+        return { type: "🌀 その他", comment: "あなたの選んだ道には独自のバランスがありました。次に何を選ぶかが、よりよい未来へのヒントになるかもしれません。" };
+      }
+    }
+
+    function nextTurn() {
+      if(state.turn > state.maxTurn) return;
+      applyPendingEffects();
+      updateStats();
+      const choiceDiv = document.getElementById("choices");
+      choiceDiv.innerHTML = "<h3>政策を選んでください：</h3>";
+      policies.forEach(p => {
+        const btn = document.createElement("button");
+        btn.textContent = p.name;
+        if (state.budget < 0 && p.name !== "なにもしない") {
+          btn.disabled = true;
+        }
+        btn.onclick = () => {
+          p.immediate();
+          updateStats();
+          state.turn++;
+          state.budget += 10;
+          log("政策予算が10回復した。（+10）");
+          if(state.turn > state.maxTurn){
+            endGame();
+          } else {
+            nextTurn();
+          }
+        };
+        choiceDiv.appendChild(btn);
+      });
+    }
+
+    function endGame() {
+      const s = state;
+      const result = getResultComment();
+      document.getElementById("choices").innerHTML = `
+        <h2>ゲーム終了</h2>
+        <p>最終結果：</p>
+        <ul style="text-align:left; display:inline-block;">
+          <li>経済活性度：${s.economy} ${getEconomyIcon()}</li>
+          <li>環境負荷レベル：${s.environment} ${getEmojiBar(s.environment, "🌱", true)}</li>
+          <li>幸福度：${s.happiness} ${getHappinessIcon()}</li>
+          <li>政策予算：${s.budget} ${getEmojiBar(s.budget, "💰")}</li>
+        </ul>
+        <h3>${result.type}</h3>
+        <p>${result.comment}</p>
+        <p><strong>ジレンマの中でどうバランスをとったかを振り返ってみましょう。</strong></p>
+      `;
+    }
+
+    nextTurn();
+  </script>
+</body>
+</html>
